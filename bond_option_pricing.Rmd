@@ -1,0 +1,620 @@
+---
+title: "pricing bond options"
+author: "mdowns"
+date: "November 04, 2015"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='hide',warning=FALSE,fig.show='asis',fig.height=3.5,fig.width=5}
+library(xts)
+library(urca)
+library(quantmod)
+library(fUnitRoots)
+library(PerformanceAnalytics)
+library(highfrequency)
+library(fOptions)
+library(optimx)
+#library(timeSeries)
+#library(timeDate)
+
+#library(lubridate)
+#library(tseries)
+#library(TTR)
+#library(caret)
+#library(mondate)
+#library(MTS)
+#library(car)
+
+```
+
+## problem 1
+
+*(a) Use these data to calibrate the model parameters ($\kappa$, $\theta$, $\sigma$) and instantaneous interest rates on December 20, 2006.*
+
+Parameter values are below. The first set is from the unconstrained optimization. The second set is from the constrained optimization.
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=4,fig.width=7}
+
+# retrieve ddata
+address.head <- "http://www.stanford.edu/~xing/statfinbook/_BookData/"
+address.tail <- "Chap10/bonds_yield_dec2006.txt"
+address <- paste(address.head,address.tail,sep='')
+data <- read.table(address,head=T)
+
+# functions
+est_beta_vs=function(kappa,ttm){(1-exp(-(kappa*ttm)))/kappa}
+est_alpha_vs=function(theta,sigma,kappa,beta,ttm){
+     exp((theta-(sigma^2/(2*(kappa^2))))*(beta-ttm)-((sigma^2)/(4*kappa))*beta^2)}
+est_r_t=function(alpha,beta,ttm,r_t){-(log(alpha)/ttm)+r_t*(beta/ttm)}
+
+# start values
+r_t=data$yield/100
+kappa=0.5
+theta=mean(r_t)
+sigma=mean(r_t)
+ttm=data$year.to.maturity
+
+parms=as.data.frame(t(c(kappa,theta,sigma)));colnames(parms)=c("kappa","theta","sigma")
+dat=as.data.frame(cbind(ttm,r_t))
+
+# lease squares fit function
+opt_mdl_vs=function(data,par){
+     
+     kappa=par[1]
+     theta=par[2]
+     sigma=par[3]
+     ttm=data[,1]
+     r_t=data[,2]
+     
+     beta=est_beta_vs(kappa,ttm)
+     alpha=est_alpha_vs(theta,sigma,kappa,beta,ttm)
+     spot=est_r_t(alpha,beta,ttm,r_t)
+     
+     fit.err=sum((r_t-spot)^2)
+     return(fit.err)
+}
+
+# unconstrained optimization
+rslt.vs.opt.unc=optim(par=parms,fn=opt_mdl_vs,data=dat)
+rslt.vs.opt.unc$par
+kappa.vs.opt.unc=rslt.vs.opt.unc$par[1];theta.vs.opt.unc=rslt.vs.opt.unc$par[2];sigma.vs.opt.unc=rslt.vs.opt.unc$par[3]
+
+# constrained optimization
+rslt.vs.opt.c=optim(par=parms,fn=opt_mdl_vs,data=dat,lower=c(0.0001,0.0001,0.0001))
+rslt.vs.opt.c$par
+kappa.vs.opt.c=rslt.vs.opt.c$par[1];theta.vs.opt.c=rslt.vs.opt.c$par[2];sigma.vs.opt.c=rslt.vs.opt.c$par[3]
+
+```
+
+Both instantaneous and spot rates are shown in the graphics below. 
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=3.5,fig.width=7}
+#******** rates
+# spot rates
+beta.vs.opt.c=est_beta_vs(kappa.vs.opt.c,ttm)
+alpha.vs.opt.c=est_alpha_vs(theta.vs.opt.c,sigma.vs.opt.c,kappa.vs.opt.c,beta.vs.opt.c,ttm)
+spot.vs.opt.c=est_r_t(alpha.vs.opt.c,beta.vs.opt.c,ttm,r_t)
+
+beta.vs.opt.unc=est_beta_vs(kappa.vs.opt.unc,ttm)
+alpha.vs.opt.unc=est_alpha_vs(theta.vs.opt.unc,sigma.vs.opt.unc,kappa.vs.opt.unc,beta.vs.opt.unc,ttm)
+spot.vs.opt.unc=est_r_t(alpha.vs.opt.unc,beta.vs.opt.unc,ttm,r_t)
+
+# instantaneous rates
+library(numDeriv)
+
+## unconstrained kappa, sigma, theta provided by optim
+beta_func_vs_unc=function(ttm){(1-exp(-(-0.000129566*ttm)))/-0.000129566}
+
+alpha_func_inst_vs_unc=function(ttm){log(exp((0.0470205450-(0.0001627793^2/(2*(-0.000129566^2))))*(beta_func_vs_unc(ttm)-ttm)-
+                                         ((0.0001627793^2)/(4*-0.000129566))*beta_func_vs_unc(ttm)^2))}
+
+alpha_func_vs_unc=function(ttm){exp((0.04717334-(0.0001627793^2/(2*(-0.000129566^2))))*(beta_func_vs_unc(ttm)-ttm)-
+                                         ((0.0001627793^2)/(4*-0.000129566))*beta_func_vs_unc(ttm)^2)}
+
+## constrained kappa, sigma, theta provided by optim
+beta_func_vs_c=function(ttm){(1-exp(-(0.50156643*ttm)))/0.50156643}
+
+alpha_func_inst_vs_c=function(ttm){log(exp((0.04690427-(0.00010000^2/(2*(0.50156643^2))))*(beta_func_vs_c(ttm)-ttm)-
+                                         ((0.00010000^2)/(4*0.50156643))*beta_func_vs_c(ttm)^2))}
+
+alpha_func_vs_c=function(ttm){exp((0.04690427-(0.00010000^2/(2*(0.50156643^2))))*(beta_func_vs_c(ttm)-ttm)-
+                                         ((0.00010000^2)/(4*0.50156643))*beta_func_vs_c(ttm)^2)}
+
+## calculate the gradient
+gb.c=grad(func=beta_func_vs_c,x=ttm)
+ga.c=grad(func=alpha_func_inst_vs_c,x=ttm)
+rslt.c=-ga.c + r_t*gb.c
+
+gb.unc=grad(func=beta_func_vs_unc,x=ttm)
+ga.unc=grad(func=alpha_func_inst_vs_unc,x=ttm)
+rslt.unc=-ga.unc + r_t*gb.unc
+
+## plot the results
+par(mfrow=c(1,2))
+plot(r_t,type="l",lwd=2,main="constrained vasicek yields",ylim=range(cbind(spot.vs.opt.c,r_t)))
+lines(spot.vs.opt.c,col="red",lwd=2)
+lines(rslt.c,col="blue",lwd=2)
+legend("topright",legend=c("observed","spot - optim","instant - optim"),col=c("black","red","blue"),lwd=2,cex=0.7)
+
+plot(r_t,type="l",lwd=2,main="unconstrained vasicek yields",ylim=range(cbind(spot.vs.opt.unc,rslt.unc)))
+lines(spot.vs.opt.unc,col="red",lwd=2)
+lines(rslt.unc,col="blue",lwd=2)
+legend("topright",legend=c("observed","spot - optim","instant - optim"),col=c("black","red","blue"),lwd=2,cex=0.7)
+
+```
+
+\textbf{comments:} 
+
+The key to getting any result in part "b" below was to constrain the least squares optimization of $\kappa$, $\sigma$ and $\theta$ to positive numbers. So, the graphics above show the computation of spot and instantaneous rates using constrained and unconstrained models. Note that the observed rates in the unconstrained Vasicek yields have been overwritten by the optimized Vasicek fit (red) which interpolated the data. Error rates for the unconstrained and constrained fits, respectively, are:
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=4,fig.width=7}
+
+rslt.vs.opt.unc$value;rslt.vs.opt.c$value
+
+```
+
+\textbf{code:}
+```{r eval=FALSE,cache=FALSE,echo=TRUE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=4,fig.width=7}
+
+# retrieve ddata
+address.head <- "http://www.stanford.edu/~xing/statfinbook/_BookData/"
+address.tail <- "Chap10/bonds_yield_dec2006.txt"
+address <- paste(address.head,address.tail,sep='')
+data <- read.table(address,head=T)
+
+# functions
+est_beta_vs=function(kappa,ttm){(1-exp(-(kappa*ttm)))/kappa}
+est_alpha_vs=function(theta,sigma,kappa,beta,ttm){
+     exp((theta-(sigma^2/(2*(kappa^2))))*(beta-ttm)-((sigma^2)/(4*kappa))*beta^2)}
+est_r_t=function(alpha,beta,ttm,r_t){-(log(alpha)/ttm)+r_t*(beta/ttm)}
+
+# start values
+r_t=data$yield/100
+kappa=0.5
+theta=mean(r_t)
+sigma=mean(r_t)
+ttm=data$year.to.maturity
+
+parms=as.data.frame(t(c(kappa,theta,sigma)));colnames(parms)=c("kappa","theta","sigma")
+dat=as.data.frame(cbind(ttm,r_t))
+
+# lease squares fit function
+opt_mdl_vs=function(data,par){
+     
+     kappa=par[1]
+     theta=par[2]
+     sigma=par[3]
+     ttm=data[,1]
+     r_t=data[,2]
+     
+     beta=est_beta_vs(kappa,ttm)
+     alpha=est_alpha_vs(theta,sigma,kappa,beta,ttm)
+     spot=est_r_t(alpha,beta,ttm,r_t)
+     
+     fit.err=sum((r_t-spot)^2)
+     return(fit.err)
+}
+
+# unconstrained optimization
+rslt.vs.opt.unc=optim(par=parms,fn=opt_mdl_vs,data=dat)
+rslt.vs.opt.unc$par
+kappa.vs.opt.unc=rslt.vs.opt.unc$par[1];theta.vs.opt.unc=rslt.vs.opt.unc$par[2];sigma.vs.opt.unc=rslt.vs.opt.unc$par[3]
+
+# constrained optimization
+rslt.vs.opt.c=optim(par=parms,fn=opt_mdl_vs,data=dat,lower=c(0.0001,0.0001,0.0001))
+rslt.vs.opt.c$par
+kappa.vs.opt.c=rslt.vs.opt.c$par[1];theta.vs.opt.c=rslt.vs.opt.c$par[2];sigma.vs.opt.c=rslt.vs.opt.c$par[3]
+
+#******** rates
+# spot rates
+beta.vs.opt.c=est_beta_vs(kappa.vs.opt.c,ttm)
+alpha.vs.opt.c=est_alpha_vs(theta.vs.opt.c,sigma.vs.opt.c,kappa.vs.opt.c,beta.vs.opt.c,ttm)
+spot.vs.opt.c=est_r_t(alpha.vs.opt.c,beta.vs.opt.c,ttm,r_t)
+
+beta.vs.opt.unc=est_beta_vs(kappa.vs.opt.unc,ttm)
+alpha.vs.opt.unc=est_alpha_vs(theta.vs.opt.unc,sigma.vs.opt.unc,kappa.vs.opt.unc,beta.vs.opt.unc,ttm)
+spot.vs.opt.unc=est_r_t(alpha.vs.opt.unc,beta.vs.opt.unc,ttm,r_t)
+
+# instantaneous rates
+library(numDeriv)
+
+## unconstrained kappa, sigma, theta provided by optim
+beta_func_vs_unc=function(ttm){(1-exp(-(-0.000129566*ttm)))/-0.000129566}
+
+alpha_func_inst_vs_unc=function(ttm){log(exp((0.0470205450-(0.0001627793^2/(2*(-0.000129566^2))))*(beta_func_vs_unc(ttm)-ttm)-
+                                         ((0.0001627793^2)/(4*-0.000129566))*beta_func_vs_unc(ttm)^2))}
+
+alpha_func_vs_unc=function(ttm){exp((0.04717334-(0.0001627793^2/(2*(-0.000129566^2))))*(beta_func_vs_unc(ttm)-ttm)-
+                                         ((0.0001627793^2)/(4*-0.000129566))*beta_func_vs_unc(ttm)^2)}
+
+## constrained kappa, sigma, theta provided by optim
+beta_func_vs_c=function(ttm){(1-exp(-(0.50156643*ttm)))/0.50156643}
+
+alpha_func_inst_vs_c=function(ttm){log(exp((0.04690427-(0.00010000^2/(2*(0.50156643^2))))*(beta_func_vs(ttm)-ttm)-
+                                         ((0.00010000^2)/(4*0.50156643))*beta_func_vs_c(ttm)^2))}
+
+alpha_func_vs_c=function(ttm){exp((0.04690427-(0.00010000^2/(2*(0.50156643^2))))*(beta_func_vs(ttm)-ttm)-
+                                         ((0.00010000^2)/(4*0.50156643))*beta_func_vs_c(ttm)^2)}
+
+## calculate the gradient
+gb.c=grad(func=beta_func_vs_c,x=ttm)
+ga.c=grad(func=alpha_func_inst_vs_c,x=ttm)
+rslt.c=-ga.c + r_t*gb.c
+
+gb.unc=grad(func=beta_func_vs_unc,x=ttm)
+ga.unc=grad(func=alpha_func_inst_vs_unc,x=ttm)
+rslt.unc=-ga.unc + r_t*gb.unc
+
+## plot the results
+par(mfrow=c(1,2))
+plot(r_t,type="l",lwd=2,main="constrained vasicek yields",ylim=range(cbind(spot.vs.opt.c,r_t)))
+lines(spot.vs.opt.c,col="red",lwd=2)
+lines(rslt.c,col="blue",lwd=2)
+legend("topright",legend=c("observed","spot - optim","instant - optim"),col=c("black","red","blue"),lwd=2)
+
+plot(r_t,type="l",lwd=2,main="unconstrained vasicek yields",ylim=range(cbind(spot.vs.opt.unc,rslt.unc)))
+lines(spot.vs.opt.unc,col="red",lwd=2)
+lines(rslt.unc,col="blue",lwd=2)
+legend("topright",legend=c("observed","spot - optim","instant - optim"),col=c("black","red","blue"),lwd=2)
+
+```
+
+*(b) With the fitted model and the initial short-term interest rate 4.75%, calculate the price of a 2.5-year European call option, with strike price $99, on a bond that matures in three years, pays coupons semiannually at 5% rate and has par value $100.*
+
+Value of the 2.5 year european call option in dollars:
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=4,fig.width=7}
+
+### given
+bnd.r.t=0.0475 # short term rate
+bnd.par=1 # par or face value of bond
+bnd.ttm=3
+div=0.05 
+omega=1 # call option indicator
+opt.strike=99/100 # strike price
+opt.ttm=2.5 # option ttm
+
+#********** bond price
+price_func_vs=function(ttm){alpha_func_vs_c(ttm) * exp(-beta_func_vs_c(ttm)*r_t)}
+p_t_vs=price_func_vs(ttm)*bnd.par
+
+#********** option price
+# vs-specific settings
+bnd.beta.T.Tilde=(beta_func_vs_c(opt.ttm)-beta_func_vs_c(bnd.ttm)) # beta on 0.5 yr bond 2.5 yrs hence
+bnd.p.t.Tilde=p_t_vs[which(ttm>3 & ttm<3.5)] #price today for bond maturing in three years
+bnd.p.t.T=p_t_vs[which(ttm>2.5 & ttm<3)] # price today for bond maturing in 2.5 years
+
+# Jamshidian bond option prices
+sigma.p.vs=sigma.vs.opt.c*sqrt((1-exp(-2*kappa.vs.opt.c*opt.ttm))/(2*kappa.vs.opt.c))*bnd.beta.T.Tilde
+#v2=sigma.vs.opt.c^2*(1-exp(-2*kappa.vs.opt.c*bnd.ttm))/2*kappa.vs.opt.c 
+#sigma.p.vs=sqrt(v2)*(1-exp(-kappa.vs.opt.c*bnd.ttm))/kappa.vs.opt.c
+h.vs=(log(bnd.p.t.Tilde/(bnd.p.t.T*opt.strike))/sigma.p.vs+sigma.p.vs/2)
+
+z.t.vs=omega*((bnd.p.t.Tilde*pnorm(omega*h.vs))-(opt.strike*bnd.p.t.T*pnorm(omega*(h.vs-sigma.p.vs))))
+as.numeric(z.t.vs*100)
+
+```
+
+\textbf{comments:}
+
+The graphic below shows the expected bond values underlying the call option.
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=3.5,fig.width=5}
+
+plot(ttm,p_t_vs,type="l",lwd=2,main="vasicek zero coupon bond prices")
+
+```
+
+\textbf{code:}
+```{r eval=FALSE,cache=FALSE,echo=TRUE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=4,fig.width=7}
+
+### given
+bnd.r.t=0.0475 # short term rate
+bnd.par=1 # par or face value of bond
+bnd.ttm=3
+div=0.05 
+omega=1 # call option indicator
+opt.strike=99/100 # strike price
+opt.ttm=2.5 # option ttm
+
+#********** bond price
+price_func_vs=function(ttm){alpha_func_vs_c(ttm) * exp(-beta_func_vs_c(ttm)*r_t)}
+p_t_vs=price_func_vs(ttm)*bnd.par
+
+#********** option price
+# vs-specific settings
+bnd.beta.T.Tilde=(beta_func_vs_c(opt.ttm)-beta_func_vs_c(bnd.ttm)) # beta on 0.5 yr bond 2.5 yrs hence
+bnd.p.t.Tilde=p_t_vs[which(ttm>3 & ttm<3.5)] #price today for bond maturing in three years
+bnd.p.t.T=p_t_vs[which(ttm>2.5 & ttm<3)] # price today for bond maturing in 2.5 years
+
+# Jamshidian bond option prices
+sigma.p.vs=sigma.vs.opt.c*sqrt((1-exp(-2*kappa.vs.opt.c*opt.ttm))/(2*kappa.vs.opt.c))*bnd.beta.T.Tilde
+#v2=sigma.vs.opt.c^2*(1-exp(-2*kappa.vs.opt.c*bnd.ttm))/2*kappa.vs.opt.c 
+#sigma.p.vs=sqrt(v2)*(1-exp(-kappa.vs.opt.c*bnd.ttm))/kappa.vs.opt.c
+h.vs=(log(bnd.p.t.Tilde/(bnd.p.t.T*opt.strike))/sigma.p.vs+sigma.p.vs/2)
+
+z.t.vs=omega*((bnd.p.t.Tilde*pnorm(omega*h.vs))-(opt.strike*bnd.p.t.T*pnorm(omega*(h.vs-sigma.p.vs))))
+as.numeric(z.t.vs*100)
+
+```
+
+
+*(c) Consider the same problem as in (a) and (b), but use the CIR model.*
+
+Parameter values are below. The first set is from the unconstrained optimization. The second set is from the constrained optimization.
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=3.5,fig.width=5}
+
+#********* 
+# start values
+r_t=data$yield/100
+kappa=0.5
+theta=mean(r_t)
+sigma=sd(r_t)
+ttm=data$year.to.maturity
+
+parms=as.data.frame(cbind(kappa,theta,sigma));colnames(parms)=c("kappa","theta","sigma")
+dat=as.data.frame(cbind(ttm,r_t))
+
+# functions
+est_h_cir=function(kappa,sigma){sqrt(kappa^2+2*(sigma^2))}
+
+est_beta_cir=function(h,kappa,ttm){
+     (2*(exp(ttm*h)-1))/
+          (2*h+(kappa+h)*(exp(ttm*h)-1))}
+
+est_alpha.cir=function(h,kappa,theta,sigma,ttm){
+     ((2*h*exp(((kappa+h)*ttm)/2))/
+           (2*h+(kappa+h)*(exp(ttm*h)-1)))^(2*kappa*(theta/sigma^2))}
+
+# lease squares fit function
+opt_mdl_cir=function(data,par){
+     
+     kappa=par[1]
+     theta=par[2]
+     sigma=par[3]
+     ttm=data[,1]
+     r_t=data[,2]
+     
+     h=est_h_cir(kappa,sigma)
+     beta=est_beta_cir(h,kappa,ttm)
+     alpha=est_alpha.cir(h,kappa,theta,sigma,ttm)
+     spot=est_r_t(alpha,beta,ttm,r_t)
+     
+     fit.err=sum((r_t-spot)^2)
+     return(fit.err)
+}
+
+# unconstrained optimization
+rslt.cir.opt.u=optim(par=parms,fn=opt_mdl_cir,data=dat)
+rslt.cir.opt.u$par
+kappa.cir.opt.u=rslt.cir.opt.u$par[1];theta.cir.opt.u=rslt.cir.opt.u$par[2];sigma.cir.opt.u=rslt.cir.opt.u$par[3]
+
+# constrained optimization
+rslt.cir.opt=optim(par=parms,fn=opt_mdl_cir,data=dat,lower=c(0.0001,0.0001,0.0001))
+rslt.cir.opt$par
+kappa.cir.opt=rslt.cir.opt$par[1];theta.cir.opt=rslt.cir.opt$par[2];sigma.cir.opt=rslt.cir.opt$par[3]
+
+```
+
+Both instantaneous and spot rates are shown in the graphic below.
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=3.5,fig.width=7}
+
+#******** rates
+h.cir.opt.u=est_h_cir(kappa.cir.opt.u,sigma.cir.opt.u)
+beta.cir.opt.u=est_beta_cir(h.cir.opt.u,kappa.cir.opt.u,ttm)
+alpha.cir.opt.u=est_alpha.cir(h.cir.opt.u,kappa.cir.opt.u,theta.cir.opt.u,sigma.cir.opt.u,ttm)
+spot.cir.opt.u=est_r_t(alpha.cir.opt.u,beta.cir.opt.u,ttm,r_t)
+
+h.cir.opt=est_h_cir(kappa.cir.opt,sigma.cir.opt)
+beta.cir.opt=est_beta_cir(h.cir.opt,kappa.cir.opt,ttm)
+alpha.cir.opt=est_alpha.cir(h.cir.opt,kappa.cir.opt,theta.cir.opt,sigma.cir.opt,ttm)
+spot.cir.opt=est_r_t(alpha.cir.opt,beta.cir.opt,ttm,r_t)
+
+## instantaneous rates
+beta_func_cir_u=function(ttm){(1-exp(-(-0.0000156*ttm)))/-0.0000156}
+
+alpha_func_cir_u=function(ttm){exp((0.0478709-(0.000035175^2/(2*(-0.0000156^2))))*(beta_func_cir_u(ttm)-ttm)-
+                                          (0.000035175^2/(4*-0.0000156))*beta_func_cir_u(ttm)^2)}
+
+beta_func_cir=function(ttm){(1-exp(-(0.44977704*ttm)))/0.44977704}
+
+alpha_func_cir=function(ttm){exp((0.04692863-(0.0001000^2/(2*(0.44977704^2))))*(beta_func_cir(ttm)-ttm)-
+                                          (0.0001000^2/(4*0.44977704))*beta_func_cir(ttm)^2)}
+
+## calculate the gradient
+gb.u=grad(func=beta_func_cir_u,x=ttm,)
+ga.u=grad(func=alpha_func_cir_u,x=ttm)
+rslt.u=-ga.u + r_t*gb.u
+
+gb=grad(func=beta_func_cir,x=ttm,)
+ga=grad(func=alpha_func_cir,x=ttm)
+rslt=-ga + r_t*gb
+
+par(mfrow=c(1,2))
+plot(r_t,type="l",lwd=2,main="constrained cir yields",ylim=range(cbind(spot.cir.opt,rslt)))
+lines(spot.cir.opt,col="red",lwd=2)
+lines(rslt,col="blue",lwd=2)
+legend("bottomleft",legend=c("observed","spot - optim","instant - opim"),col=c("black","red","blue"),lwd=2,cex=0.7)
+
+plot(r_t,type="l",lwd=2,main="unconstrained cir yields",ylim=range(cbind(spot.cir.opt.u,rslt.u)))
+lines(spot.cir.opt.u,col="red",lwd=2)
+lines(rslt.u,col="blue",lwd=2)
+legend("topright",legend=c("observed","spot - optim","instant - opim"),col=c("black","red","blue"),lwd=2,cex=0.7)
+
+```
+
+Estimated value for the call option using cir:
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=4,fig.width=7}
+
+#********** bond price
+price_func_cir=function(ttm){alpha_func_cir(ttm) * exp(-beta_func_cir(ttm)*r_t)}
+p_t_cir=price_func_cir(ttm)
+
+#********** option price
+bnd.beta.T.Tilde=beta_func_cir(opt.ttm)-beta_func_cir(bnd.ttm) # beta on 0.5 yr bond 2.5 yrs hence
+bnd.alpha.T.Tilde=alpha_func_cir(opt.ttm)-alpha_func_cir(bnd.ttm)
+bnd.p.t.Tilde=p_t_cir[which(ttm>3 & ttm<3.5)] #p_t_cir where 3 < ytm < 3.5
+bnd.p.t.T=p_t_cir[which(ttm>2.5 & ttm<3)]
+
+# bond option prices using cir
+cir.rho=(2*h.cir.opt)/
+     (sigma.cir.opt^2*(exp(h.cir.opt*opt.ttm)-1))
+
+cir.psi=(kappa.cir.opt+h.cir.opt)/sigma.cir.opt^2
+
+cir.mu=(log(bnd.alpha.T.Tilde/opt.strike))/
+     bnd.beta.T.Tilde
+
+cir.z=bnd.p.t.Tilde*pchisq(2*cir.mu*(cir.rho+cir.psi+bnd.beta.T.Tilde),
+                           (4*kappa.cir.opt*theta.cir.opt)/sigma.cir.opt^2,
+                           (2*cir.rho^2*bnd.r.t*exp(h.cir.opt*opt.ttm))/(cir.rho+cir.psi+bnd.beta.T.Tilde))-
+     opt.strike*bnd.p.t.T*pchisq(2*cir.mu*(cir.rho+cir.psi),
+                                 (4*kappa.cir.opt*theta.cir.opt)/sigma.cir.opt^2,
+                                 (2*cir.rho^2*bnd.r.t*exp(h.cir.opt*opt.ttm))/(cir.rho+cir.psi))
+
+as.numeric(cir.z*100)
+
+```
+
+\textbf{comments:}
+
+The call value is based on the cir (black) bond prices below. Vasicek values (red) provided for reference. 
+
+```{r eval=TRUE,cache=TRUE,echo=FALSE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=3.5,fig.width=5}
+
+plot(p_t_cir,type="l",main="bond prices: cir v vasicek",lwd=2,ylab="presumably this is discount to face value")
+lines(p_t_vs,col="red",lwd=2)
+legend("bottomleft",legend=c("cir - optim","vasicek - optim"),col=c("black","red"),lwd=2)
+
+```
+
+\textbf{code:}
+```{r eval=FALSE,cache=FALSE,echo=TRUE,message=FALSE,results='markup',warning=FALSE,fig.show='asis',fig.height=4,fig.width=7}
+
+#********* 
+# start values
+r_t=data$yield/100
+kappa=0.5
+theta=mean(r_t)
+sigma=sd(r_t)
+ttm=data$year.to.maturity
+
+parms=as.data.frame(cbind(kappa,theta,sigma));colnames(parms)=c("kappa","theta","sigma")
+dat=as.data.frame(cbind(ttm,r_t))
+
+# functions
+est_h_cir=function(kappa,sigma){sqrt(kappa^2+2*(sigma^2))}
+
+est_beta_cir=function(h,kappa,ttm){
+     (2*(exp(ttm*h)-1))/
+          (2*h+(kappa+h)*(exp(ttm*h)-1))}
+
+est_alpha.cir=function(h,kappa,theta,sigma,ttm){
+     ((2*h*exp(((kappa+h)*ttm)/2))/
+           (2*h+(kappa+h)*(exp(ttm*h)-1)))^(2*kappa*(theta/sigma^2))}
+
+# lease squares fit function
+opt_mdl_cir=function(data,par){
+     
+     kappa=par[1]
+     theta=par[2]
+     sigma=par[3]
+     ttm=data[,1]
+     r_t=data[,2]
+     
+     h=est_h_cir(kappa,sigma)
+     beta=est_beta_cir(h,kappa,ttm)
+     alpha=est_alpha.cir(h,kappa,theta,sigma,ttm)
+     spot=est_r_t(alpha,beta,ttm,r_t)
+     
+     fit.err=sum((r_t-spot)^2)
+     return(fit.err)
+}
+
+# unconstrained optimization
+rslt.cir.opt.u=optim(par=parms,fn=opt_mdl_cir,data=dat)
+rslt.cir.opt.u$par
+kappa.cir.opt.u=rslt.cir.opt.u$par[1];theta.cir.opt.u=rslt.cir.opt.u$par[2];sigma.cir.opt.u=rslt.cir.opt.u$par[3]
+
+# constrained optimization
+rslt.cir.opt=optim(par=parms,fn=opt_mdl_cir,data=dat,lower=c(0.0001,0.0001,0.0001))
+rslt.cir.opt$par
+kappa.cir.opt=rslt.cir.opt$par[1];theta.cir.opt=rslt.cir.opt$par[2];sigma.cir.opt=rslt.cir.opt$par[3]
+
+#******** rates
+h.cir.opt.u=est_h_cir(kappa.cir.opt.u,sigma.cir.opt.u)
+beta.cir.opt.u=est_beta_cir(h.cir.opt.u,kappa.cir.opt.u,ttm)
+alpha.cir.opt.u=est_alpha.cir(h.cir.opt.u,kappa.cir.opt.u,theta.cir.opt.u,sigma.cir.opt.u,ttm)
+spot.cir.opt.u=est_r_t(alpha.cir.opt.u,beta.cir.opt.u,ttm,r_t)
+
+h.cir.opt=est_h_cir(kappa.cir.opt,sigma.cir.opt)
+beta.cir.opt=est_beta_cir(h.cir.opt,kappa.cir.opt,ttm)
+alpha.cir.opt=est_alpha.cir(h.cir.opt,kappa.cir.opt,theta.cir.opt,sigma.cir.opt,ttm)
+spot.cir.opt=est_r_t(alpha.cir.opt,beta.cir.opt,ttm,r_t)
+
+## instantaneous rates
+beta_func_cir_u=function(ttm){(1-exp(-(-0.0000156*ttm)))/-0.0000156}
+
+alpha_func_cir_u=function(ttm){exp((0.0478709-(0.000035175^2/(2*(-0.0000156^2))))*(beta_func_cir_u(ttm)-ttm)-
+                                          (0.000035175^2/(4*-0.0000156))*beta_func_cir_u(ttm)^2)}
+
+beta_func_cir=function(ttm){(1-exp(-(0.44977704*ttm)))/0.44977704}
+
+alpha_func_cir=function(ttm){exp((0.04692863-(0.0001000^2/(2*(0.44977704^2))))*(beta_func_cir(ttm)-ttm)-
+                                          (0.0001000^2/(4*0.44977704))*beta_func_cir(ttm)^2)}
+
+## calculate the gradient
+gb.u=grad(func=beta_func_cir_u,x=ttm,)
+ga.u=grad(func=alpha_func_cir_u,x=ttm)
+rslt.u=-ga.u + r_t*gb.u
+
+gb=grad(func=beta_func_cir,x=ttm,)
+ga=grad(func=alpha_func_cir,x=ttm)
+rslt=-ga + r_t*gb
+
+par(mfrow=c(1,2))
+plot(r_t,type="l",lwd=2,main="constrained cir yields",ylim=range(cbind(spot.cir.opt,rslt)))
+lines(spot.cir.opt,col="red",lwd=2)
+lines(rslt,col="blue",lwd=2)
+legend("bottomleft",legend=c("observed","spot - optim","instant - opim"),col=c("black","red","blue"),lwd=2)
+
+plot(r_t,type="l",lwd=2,main="unconstrained cir yields",ylim=range(cbind(spot.cir.opt.u,rslt.u)))
+lines(spot.cir.opt.u,col="red",lwd=2)
+lines(rslt.u,col="blue",lwd=2)
+legend("topright",legend=c("observed","spot - optim","instant - opim"),col=c("black","red","blue"),lwd=2)
+
+#********** bond price
+price_func_cir=function(ttm){alpha_func_cir(ttm) * exp(-beta_func_cir(ttm)*r_t)}
+p_t_cir=price_func_cir(ttm)
+
+#********** option price
+bnd.beta.T.Tilde=beta_func_cir(opt.ttm)-beta_func_cir(bnd.ttm) # beta on 0.5 yr bond 2.5 yrs hence
+bnd.alpha.T.Tilde=alpha_func_cir(opt.ttm)-alpha_func_cir(bnd.ttm)
+bnd.p.t.Tilde=p_t_cir[which(ttm>3 & ttm<3.5)] #p_t_cir where 3 < ytm < 3.5
+bnd.p.t.T=p_t_cir[which(ttm>2.5 & ttm<3)]
+
+# bond option prices using cir
+cir.rho=(2*h.cir.opt)/
+     (sigma.cir.opt^2*(exp(h.cir.opt*opt.ttm)-1))
+
+cir.psi=(kappa.cir.opt+h.cir.opt)/sigma.cir.opt^2
+
+cir.mu=(log(bnd.alpha.T.Tilde/opt.strike))/
+     bnd.beta.T.Tilde
+
+cir.z=bnd.p.t.Tilde*pchisq(2*cir.mu*(cir.rho+cir.psi+bnd.beta.T.Tilde),
+                           (4*kappa.cir.opt*theta.cir.opt)/sigma.cir.opt^2,
+                           (2*cir.rho^2*bnd.r.t*exp(h.cir.opt*opt.ttm))/(cir.rho+cir.psi+bnd.beta.T.Tilde))-
+     opt.strike*bnd.p.t.T*pchisq(2*cir.mu*(cir.rho+cir.psi),
+                                 (4*kappa.cir.opt*theta.cir.opt)/sigma.cir.opt^2,
+                                 (2*cir.rho^2*bnd.r.t*exp(h.cir.opt*opt.ttm))/(cir.rho+cir.psi))
+
+as.numeric(cir.z*100)
+
+```
+
